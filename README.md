@@ -261,7 +261,7 @@ export default defineConfig({
 
 ## © License
 
-**MIT License**
+**[MIT License](./LICENSE)**
 
 Open sourced by [FlyPig AI](https://flypigai.icareu.tw/)
 
