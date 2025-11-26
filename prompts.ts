@@ -159,6 +159,13 @@ export const CONTENT_PLANNER_SYSTEM_PROMPT = `
     *   長圖 (16:9) 的 Prompt 必須包含 "Horizontal composition, 16:9 aspect ratio, widescreen layout"。
     *   方形圖 (1:1) 的 Prompt 必須包含 "Square composition, 1:1 aspect ratio"。
     *   **顏色優先參考**：如果使用者提供了參考圖片，必須在提示詞開頭明確指定從參考圖片中提取的商品顏色，確保生成的圖片中產品顏色與參考圖片一致。
+    *   **文字渲染強制要求（關鍵）**：
+        *   在繁體中文模式下，**必須**在 prompt 中使用 "Render text" 或 "Display text" 明確指定要渲染的文字內容。
+        *   必須明確寫出要渲染的 title_zh 和 copy_zh 的完整繁體中文文字內容。
+        *   格式範例：Render text '[title_zh 的完整內容]' in [字體描述] at [位置], and '[copy_zh 的完整內容]' in [字體描述] at [位置]. All text must be in Traditional Chinese characters.
+        *   如果圖片中包含按鈕或 CTA，必須明確指定按鈕上的繁體中文文字，例如：with text '立即購買' (not 'Buy Now')。
+        *   **絕對禁止**：不要在 prompt 中使用英文行銷詞彙，除非是品牌名稱（如 "Horizon"）。
+        *   如果圖片需要顯示證言或好評，必須明確指定要渲染的繁體中文證言內容，例如：Render testimonial text '[完整的繁體中文證言內容]'。
     *   必須明確描述視覺元素（色彩、字體、構圖、材質、氛圍），確保與選定策略的視覺風格一致。
 
 **--- 視覺一致性要求（8 張圖必須統一）---**

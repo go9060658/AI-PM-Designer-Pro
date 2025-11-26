@@ -353,6 +353,20 @@ export const generateMarketingImage = async (
         console.warn('顏色提取失敗，使用原始提示詞:', colorError);
       }
     }
+    
+    // 在中文模式下，強制確保所有文字都是繁體中文
+    if (isChineseMode()) {
+      // 檢查 prompt 中是否有 "Render text" 或 "Display text" 指示
+      const hasTextRenderInstruction = /render\s+text|display\s+text|text\s+like|text\s+['"]/i.test(enhancedPrompt);
+      
+      // 如果沒有明確的文字渲染指示，加入強制使用繁體中文的指示
+      if (!hasTextRenderInstruction) {
+        enhancedPrompt = `${enhancedPrompt}\n\nIMPORTANT: If this image contains any text, marketing copy, testimonials, or call-to-action buttons, ALL text must be rendered in Traditional Chinese characters. Do NOT use English marketing text. Only brand names (like "Horizon") may appear in English if they are part of the product name.`;
+      } else {
+        // 即使有文字渲染指示，也加強繁體中文要求
+        enhancedPrompt = `${enhancedPrompt}\n\nCRITICAL: All rendered text must be in Traditional Chinese characters. Do NOT generate English marketing copy, testimonials, or button text.`;
+      }
+    }
 
     const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [{ text: enhancedPrompt }];
 
