@@ -212,8 +212,8 @@ export default defineConfig({
 
 如果您對 AI 視覺行銷工具感興趣，歡迎同步參考以下相關專案：
 
-*   **[AI Digital Portrait Studio](https://github.com/mkhsu2002/AI_Digital_Portrait_Studio)** - 專為電商設計 AI 人像圖片生成工具，免去繁複的手動輸入提示詞，整合 Gemini 影像模型與 Firebase，一鍵生成多視角專業人像商品圖，支援自訂風格、背景、姿態等參數。
-*   **[EC SEO SA](https://github.com/mkhsu2002/EC_SEO_SA)** - 電商 SEO 與內容行銷工具
+*   **[AI Digital Portrait Studio](https://github.com/mkhsu2002/AI_Digital_Portrait_Studio)** - 專為電商設計AI人像圖片生成工具，免去繁複的手動輸入提示詞，整合 Gemini 影像模型與 Firebase，一鍵生成多視角專業人像商品圖，支援自訂風格、背景、姿態等參數。
+*   **[AI EC SEO Booster](https://mkhsu2002.github.io/AI-EC-SEO-Booster/)** - 由AI驅動的智能電商市場分析與 SEO 內容策略生成工具，透過 Google Gemini API 提供專業的市場洞察、競爭分析、買家人物誌描繪，並自動生成 SEO 優化的內容策略與前導頁提示詞。
 
 ---
 
