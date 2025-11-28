@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { validateApiKey } from '../utils/errorHandler';
 
 interface ApiKeyModalProps {
   isOpen: boolean;
@@ -8,6 +9,7 @@ interface ApiKeyModalProps {
 export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onSave }) => {
   const [apiKey, setApiKey] = useState('');
   const [isVisible, setIsVisible] = useState(false);
+  const [validationError, setValidationError] = useState<string | undefined>();
 
   useEffect(() => {
     // Check if key exists in localStorage on mount
@@ -21,10 +23,18 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onSave }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (apiKey.trim().length > 0) {
-      localStorage.setItem('gemini_api_key', apiKey.trim());
-      onSave(apiKey.trim());
+    const trimmedKey = apiKey.trim();
+    
+    // 驗證 API Key
+    const validation = validateApiKey(trimmedKey);
+    if (!validation.valid) {
+      setValidationError(validation.error);
+      return;
     }
+    
+    setValidationError(undefined);
+    localStorage.setItem('gemini_api_key', trimmedKey);
+    onSave(trimmedKey);
   };
 
   return (
@@ -48,11 +58,21 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onSave }) => {
                 <input 
                     type={isVisible ? "text" : "password"}
                     value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
+                    onChange={(e) => {
+                      setApiKey(e.target.value);
+                      if (validationError) {
+                        setValidationError(undefined);
+                      }
+                    }}
                     placeholder="AIzaSy..."
-                    className="w-full bg-black/30 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:border-purple-500 focus:outline-none transition-colors pr-10"
+                    className={`w-full bg-black/30 border rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none transition-colors pr-10 ${
+                      validationError ? 'border-red-500' : 'border-white/10 focus:border-purple-500'
+                    }`}
                     required
                 />
+                {validationError && (
+                  <p className="text-red-400 text-xs mt-1">{validationError}</p>
+                )}
                 <button 
                     type="button"
                     onClick={() => setIsVisible(!isVisible)}
@@ -69,7 +89,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onSave }) => {
           
           <button 
             type="submit"
-            disabled={apiKey.length < 10}
+            disabled={apiKey.trim().length === 0 || !!validationError}
             className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold rounded-lg hover:opacity-90 transition-opacity shadow-lg shadow-purple-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             開始使用

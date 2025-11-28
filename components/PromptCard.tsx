@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { generateMarketingImage, fileToBase64 } from '../services/geminiService';
+import { useImageGeneration } from '../hooks/useImageGeneration';
+import { useImageUpload } from '../hooks/useImageUpload';
 import { Spinner } from './Spinner';
 import { PromptData } from '../types';
 import { ImageModal } from './ImageModal';
@@ -10,62 +11,37 @@ interface PromptCardProps {
 }
 
 export const PromptCard: React.FC<PromptCardProps> = ({ data, index }) => {
-  const [isLoading, setIsLoading] = useState(false);
-  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  
-  // Editable Prompt State
   const [promptText, setPromptText] = useState(data.prompt_en);
-  
-  // Reference Image State
-  const [refImage, setRefImage] = useState<string | null>(null);
+  const [aspectRatio, setAspectRatio] = useState<'3:4' | '4:3'>('3:4');
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  // Aspect Ratio State for Phase 1
-  const [aspectRatio, setAspectRatio] = useState<'3:4' | '4:3'>('3:4');
-  
-  // Image Modal State
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  // 使用自訂 Hooks
+  const { image: generatedImage, loading: isLoading, error, generateImage, clearImage } = useImageGeneration();
+  const { image: refImage, error: refImageError, uploadImage: uploadRefImage, clearImage: clearRefImage } = useImageUpload();
 
   // Reset state when data prop changes (new route selected)
   useEffect(() => {
     setPromptText(data.prompt_en);
-    setGeneratedImage(null);
-    setRefImage(null);
-    setError(null);
+    clearImage();
+    clearRefImage();
     setIsEditing(false);
-    setAspectRatio('3:4'); // Reset to default
-  }, [data]);
+    setAspectRatio('3:4');
+  }, [data, clearImage, clearRefImage]);
 
   const handleGenerate = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      // Pass the current (potentially edited) prompt, reference image, and selected aspect ratio
-      const imageUrl = await generateMarketingImage(promptText, refImage || undefined, aspectRatio);
-      setGeneratedImage(imageUrl);
-    } catch (err: any) {
-      setError(err.message || "圖片生成失敗");
-    } finally {
-      setIsLoading(false);
-    }
+    await generateImage(promptText, aspectRatio, refImage || undefined);
   };
 
   const handleRefImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      try {
-        const base64 = await fileToBase64(e.target.files[0]);
-        setRefImage(base64);
-      } catch (err) {
-        console.error("Failed to load image", err);
-        setError("讀取參考圖片失敗");
-      }
+      await uploadRefImage(e.target.files[0]);
     }
   };
 
-  const clearRefImage = () => {
-    setRefImage(null);
+  const handleClearRefImage = () => {
+    clearRefImage();
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -133,8 +109,8 @@ export const PromptCard: React.FC<PromptCardProps> = ({ data, index }) => {
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                     參考圖片 (選填)
                 </span>
-                {refImage && (
-                    <button onClick={clearRefImage} className="text-[10px] text-red-400 hover:text-red-300 underline">移除</button>
+                {(refImage || refImageError) && (
+                    <button onClick={handleClearRefImage} className="text-[10px] text-red-400 hover:text-red-300 underline">移除</button>
                 )}
              </div>
              
@@ -218,7 +194,9 @@ export const PromptCard: React.FC<PromptCardProps> = ({ data, index }) => {
 
         {/* Actions */}
         <div className="mt-auto pt-2">
-            {error && <div className="text-red-400 text-xs mb-2 text-center">{error}</div>}
+            {(error || refImageError) && (
+              <div className="text-red-400 text-xs mb-2 text-center">{error || refImageError}</div>
+            )}
             <button
                 onClick={handleGenerate}
                 disabled={isLoading}

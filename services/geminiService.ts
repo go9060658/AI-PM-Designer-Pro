@@ -1,6 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 import { DIRECTOR_SYSTEM_PROMPT, CONTENT_PLANNER_SYSTEM_PROMPT } from "../prompts";
 import { DirectorOutput, ContentPlan, MarketingRoute, ProductAnalysis, ContentItem } from "../types";
+import { handleGeminiError, AppError, ErrorType } from "../utils/errorHandler";
+import { validateDirectorOutput, validateContentPlan } from "../utils/validators";
+import { extractImageColors, colorToPromptFragment } from "../utils/imageColorExtractor";
+import { isChineseMode, extractEnglishElements } from "../utils/languageMode";
 
 // --- Helpers ---
 
@@ -12,7 +16,11 @@ const getApiKey = (): string => {
   // Fallback to process.env (for local dev if set)
   if (process.env.API_KEY) return process.env.API_KEY;
 
-  throw new Error("找不到 API 金鑰。請在設定中輸入您的 Gemini API Key。");
+  throw new AppError({
+    type: ErrorType.AUTH,
+    message: "找不到 API 金鑰",
+    userMessage: "找不到 API 金鑰。請在設定中輸入您的 Gemini API Key。",
+  });
 };
 
 const cleanJson = (text: string): string => {
@@ -26,12 +34,24 @@ const cleanJson = (text: string): string => {
 };
 
 export const fileToBase64 = async (file: File): Promise<string> => {
+  // 檔案大小檢查
+  const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+  if (file.size > MAX_SIZE) {
+    throw new Error(`檔案大小超過限制（最大 ${MAX_SIZE / 1024 / 1024}MB）`);
+  }
+
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
-      resolve(reader.result as string);
+      if (reader.result) {
+        resolve(reader.result as string);
+      } else {
+        reject(new Error('無法讀取檔案'));
+      }
     };
-    reader.onerror = reject;
+    reader.onerror = () => {
+      reject(new Error('檔案讀取失敗'));
+    };
     reader.readAsDataURL(file);
   });
 };
@@ -47,31 +67,29 @@ const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: s
   };
 };
 
-// --- Robust Error Serializer ---
+// --- Robust Error Serializer (保留用於重試邏輯) ---
 
-const serializeError = (error: any): string => {
+const serializeError = (error: unknown): string => {
   try {
     if (typeof error === 'string') return error;
     
-    // 如果是標準 Error 物件，JSON.stringify 通常會回傳 {}，所以要手動提取
     if (error instanceof Error) {
-      const errObj: any = {
+      const errObj: Record<string, unknown> = {
         name: error.name,
         message: error.message,
         stack: error.stack,
       };
-      // 嘗試提取可能掛載在 error 上的額外屬性 (如 Google SDK 常用的 response, status, statusText)
-      const customProps = Object.getOwnPropertyNames(error).reduce((acc: any, key) => {
+      
+      const customProps = Object.getOwnPropertyNames(error).reduce((acc, key) => {
         if (key !== 'name' && key !== 'message' && key !== 'stack') {
-          acc[key] = (error as any)[key];
+          acc[key] = (error as Record<string, unknown>)[key];
         }
         return acc;
-      }, {});
+      }, {} as Record<string, unknown>);
       
       return JSON.stringify({ ...errObj, ...customProps }, null, 2);
     }
 
-    // 如果是純物件 (如 fetch 回傳的 JSON error)
     return JSON.stringify(error, null, 2);
   } catch (e) {
     return String(error);
@@ -143,17 +161,7 @@ async function retryWithBackoff<T>(
   throw new Error("Unexpected retry loop exit");
 }
 
-// --- Error Handling Helper ---
-
-const handleGeminiError = (error: any): never => {
-  console.error("Gemini API Error Details:", error);
-
-  // 取得最原始的 JSON 錯誤字串，不加任何修飾，讓使用者直接除錯
-  const rawErrorString = serializeError(error);
-
-  // 直接拋出包含原始錯誤的訊息
-  throw new Error(`[RAW SERVER RESPONSE]:\n${rawErrorString}`);
-};
+// Error handling is now imported from utils/errorHandler
 
 // --- API Calls ---
 
@@ -189,30 +197,66 @@ export const analyzeProductImage = async (
     }, 3, 2000); // Flash 模型重試 3 次
 
     if (!response.text) {
-      throw new Error("Gemini 沒有回應文字");
+      throw new AppError({
+        type: ErrorType.API,
+        message: "Gemini 沒有回應文字",
+        userMessage: "AI 服務沒有回應，請稍候再試。",
+      });
     }
 
     try {
       const cleaned = cleanJson(response.text);
-      return JSON.parse(cleaned) as DirectorOutput;
+      const parsed = JSON.parse(cleaned);
+      
+      // 記錄原始回應以便除錯
+      console.log('AI 回應原始資料：', JSON.stringify(parsed, null, 2));
+      
+      // 使用 Zod 驗證回應格式
+      return validateDirectorOutput(parsed);
     } catch (e) {
-      console.error("Failed to parse JSON", response.text);
-      throw new Error("AI 總監返回了無效的格式。請再試一次。");
+      console.error("Failed to parse or validate JSON", response.text);
+      console.error("Error details:", e);
+      
+      if (e instanceof AppError) {
+        throw e;
+      }
+      
+      // 提供更詳細的錯誤訊息（開發用）
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      throw new AppError({
+        type: ErrorType.VALIDATION,
+        message: `AI 總監返回了無效的格式: ${errorMessage}`,
+        userMessage: "AI 回應格式不正確，請再試一次。如問題持續發生，請聯繫技術支援。",
+        originalError: e,
+      });
     }
   } catch (error) {
+    // 如果已經是 AppError，直接拋出
+    if (error instanceof AppError) {
+      throw error;
+    }
+    // 否則使用錯誤處理器轉換
     handleGeminiError(error);
-    return {} as DirectorOutput;
   }
 };
 
 export const generateContentPlan = async (
     route: MarketingRoute,
     analysis: ProductAnalysis,
-    referenceCopy: string
+    referenceCopy: string,
+    brandContext?: string
 ): Promise<ContentPlan> => {
     try {
       const apiKey = getApiKey();
       const ai = new GoogleGenAI({ apiKey });
+
+      // 分析品牌資訊中的英文元素
+      const englishElements = brandContext ? extractEnglishElements(brandContext) : null;
+      const languageNote = isChineseMode() 
+        ? (englishElements && (englishElements.hasEnglishSlogan || englishElements.hasEnglishBrandName)
+            ? `注意：品牌資訊中包含英文元素（Slogan: ${englishElements.englishSlogans.join(', ') || '無'}，品牌名稱: ${englishElements.englishBrandNames.join(', ') || '無'}）。在生成文案時，可以保留這些英文元素，但其他所有文字都必須使用繁體中文。`
+            : `注意：所有行銷文案都必須使用繁體中文。`)
+        : '';
 
       const promptText = `
         選定策略路線: ${route.route_name}
@@ -223,6 +267,8 @@ export const generateContentPlan = async (
         產品特點: ${analysis.key_features_zh}
         
         參考文案/競品資訊: ${referenceCopy || "無 (請自行規劃最佳結構)"}
+        
+        ${languageNote}
         
         請生成 8 張圖的完整內容企劃 (JSON)。
       `;
@@ -239,16 +285,47 @@ export const generateContentPlan = async (
           });
       }, 3, 2000);
 
-      if (!response.text) throw new Error("Gemini Planning failed");
+      if (!response.text) {
+        throw new AppError({
+          type: ErrorType.API,
+          message: "Gemini Planning failed",
+          userMessage: "內容企劃生成失敗，請稍候再試。",
+        });
+      }
 
       try {
-          return JSON.parse(cleanJson(response.text)) as ContentPlan;
+        const cleaned = cleanJson(response.text);
+        const parsed = JSON.parse(cleaned);
+        
+        // 記錄原始回應以便除錯
+        console.log('內容企劃 AI 回應原始資料：', JSON.stringify(parsed, null, 2));
+        
+        // 使用 Zod 驗證回應格式
+        return validateContentPlan(parsed);
       } catch (e) {
-          throw new Error("企劃生成格式錯誤");
+        console.error("Failed to parse or validate ContentPlan JSON", response.text);
+        console.error("Error details:", e);
+        
+        if (e instanceof AppError) {
+          throw e;
+        }
+        
+        // 提供更詳細的錯誤訊息（開發用）
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        throw new AppError({
+          type: ErrorType.VALIDATION,
+          message: `企劃生成格式錯誤: ${errorMessage}`,
+          userMessage: "內容企劃格式不正確，請再試一次。如問題持續發生，請聯繫技術支援。",
+          originalError: e,
+        });
       }
     } catch (error) {
+      // 如果已經是 AppError，直接拋出
+      if (error instanceof AppError) {
+        throw error;
+      }
+      // 否則使用錯誤處理器轉換
       handleGeminiError(error);
-      return {} as ContentPlan;
     }
 };
 
@@ -261,7 +338,37 @@ export const generateMarketingImage = async (
     const apiKey = getApiKey();
     const ai = new GoogleGenAI({ apiKey });
 
-    const parts: any[] = [{ text: prompt }];
+    // 優化提示詞：如果有參考圖片，提取顏色並加入提示詞
+    let enhancedPrompt = prompt;
+    if (referenceImageBase64) {
+      try {
+        const colors = await extractImageColors(referenceImageBase64);
+        const colorFragment = colorToPromptFragment(colors);
+        if (colorFragment) {
+          // 將顏色資訊加入提示詞開頭，確保優先參考
+          enhancedPrompt = `${colorFragment}\n\n${prompt}`;
+        }
+      } catch (colorError) {
+        // 如果顏色提取失敗，繼續使用原始提示詞
+        console.warn('顏色提取失敗，使用原始提示詞:', colorError);
+      }
+    }
+    
+    // 在中文模式下，強制確保所有文字都是繁體中文
+    if (isChineseMode()) {
+      // 檢查 prompt 中是否有 "Render text" 或 "Display text" 指示
+      const hasTextRenderInstruction = /render\s+text|display\s+text|text\s+like|text\s+['"]/i.test(enhancedPrompt);
+      
+      // 如果沒有明確的文字渲染指示，加入強制使用繁體中文的指示
+      if (!hasTextRenderInstruction) {
+        enhancedPrompt = `${enhancedPrompt}\n\nIMPORTANT: If this image contains any text, marketing copy, testimonials, or call-to-action buttons, ALL text must be rendered in Traditional Chinese characters. Do NOT use English marketing text. Only brand names (like "Horizon") may appear in English if they are part of the product name.`;
+      } else {
+        // 即使有文字渲染指示，也加強繁體中文要求
+        enhancedPrompt = `${enhancedPrompt}\n\nCRITICAL: All rendered text must be in Traditional Chinese characters. Do NOT generate English marketing copy, testimonials, or button text.`;
+      }
+    }
+
+    const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [{ text: enhancedPrompt }];
 
     if (referenceImageBase64) {
       const match = referenceImageBase64.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
@@ -301,10 +408,18 @@ export const generateMarketingImage = async (
       }
     }
     
-    throw new Error("未生成圖片 (No image data in response)");
+    throw new AppError({
+      type: ErrorType.API,
+      message: "未生成圖片 (No image data in response)",
+      userMessage: "圖片生成失敗，請稍候再試。如問題持續發生，請檢查提示詞內容或聯繫技術支援。",
+    });
   } catch (error) {
+    // 如果已經是 AppError，直接拋出
+    if (error instanceof AppError) {
+      throw error;
+    }
+    // 否則使用錯誤處理器轉換
     handleGeminiError(error);
-    return "";
   }
 };
 
@@ -318,7 +433,7 @@ export const generateFullReport = (
   const route = routes[selectedRouteIndex];
   const date = new Date().toLocaleDateString();
 
-  let report = `AI PM Designer PRO v2.9 - Product Marketing Strategy Report\n`;
+  let report = `AI PM Designer PRO v3.0 - Product Marketing Strategy Report\n`;
   report += `Date: ${date}\n`;
   report += `=================================================\n\n`;
 

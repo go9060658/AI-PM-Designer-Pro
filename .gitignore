@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Development notes and planning documents (keep locally, don't commit)
+PHASE3_FEATURES.md
+WEBPAGE_GENERATION_PLAN.md
+CODE_REVIEW.md
+IMAGE_NAMING_GUIDE.md

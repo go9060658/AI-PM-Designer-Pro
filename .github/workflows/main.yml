@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ] # 或是 master，請確認您的主分支名稱
+    branches: [ dev3.0 ] # GitHub Pages 部署使用 dev3.0 分支
 
 permissions:
   contents: read
